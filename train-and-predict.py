@@ -26,6 +26,8 @@ import os
 
 # Hyperparameter fields 
 train_pct = 0.8
+MIN_FREQ_CAT = 1000  
+MAX_CAT = 10
 
 # 1. INPUT PARSING -------------------------------------------------
 supported_models = ["LogisticRegression", 
@@ -154,3 +156,72 @@ train_labels = train_labels_filt
 
 # Removing amount_tsh column from training data due to high # of NaNs
 train_values.drop(columns=["amount_tsh"])
+
+
+
+
+# # Detect Outlier through Z Scores
+# z_scores = np.abs(train_values[numeric_cols].apply(zscore))
+# threshold = 3
+# # train_values.describe()
+# # mask = (np.abs(z_scores) < threshold).all(axis=1)
+# # non_outlier_values = train_values[mask].reset_index(drop=True)
+# # non_outlier_labels = train_labels[mask].reset_index(drop=True)
+# # train_values = non_outlier_values
+# # train_labels = non_outlier_labels
+# outliers = (z_scores > threshold).any(axis=1)
+# print(outliers)
+# values_clean = train_values[~outliers].reset_index(drop=True)
+# labels_clean = train_labels[~outliers].reset_index(drop=True)
+# train_values = values_clean
+# train_labels = labels_clean
+
+# print("New corpus shape after zscore outlier")
+# print(train_values.shape)
+# print(train_labels.shape)
+
+
+
+
+if categorical_preprocessing == "OneHotEncoder":
+   encoder = OneHotEncoder(
+    #   min_frequency= MIN_FREQ_CAT
+    #   , max_categories = MAX_CAT
+    #   , handle_unknown='infrequent_if_exist'
+    #   , drop= "first"
+    #   , sparse_output= False # Linear regression performs poorly on sparse data
+   )   
+elif categorical_preprocessing == "OrdinalEncoder":
+   # TODO this will have issues with NaNs -> best practice is to deal with NaNs by imputing or fillna()
+   encoder = OrdinalEncoder(
+    #   handle_unknown="use_encoded_value"
+    #   , unknown_value=-1
+    #   , encoded_missing_value= -1 #TODO esto esta bien???
+    #   , dtype=float
+    #   , min_frequency = MIN_FREQ_CAT
+    #   , max_categories = MAX_CAT
+   )
+elif categorical_preprocessing == "TargetEncoder":
+   encoder = TargetEncoder(
+      #target_type = "multiclass"
+   )
+
+
+# Numerical preprocessing
+if numerical_preprocessing == "StandardScaler" :
+   scaler = StandardScaler()
+else:
+   scaler = "passthrough"
+
+# Transformer object with scaler and encoder
+preprocessor = ColumnTransformer(
+   transformers = [
+      ('num', scaler, numeric_cols),
+      ('cat', encoder, categoric_cols)],
+   verbose=True)
+
+
+# # Apply to the training data 
+X_train_transformed = preprocessor.fit_transform(X_train)
+   
+
