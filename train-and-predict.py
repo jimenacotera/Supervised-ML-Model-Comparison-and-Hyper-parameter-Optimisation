@@ -27,10 +27,7 @@ import os
 # Hyperparameter fields 
 train_pct = 0.8
 
-
-t
-#     python train-and-predict.py <train-input-file> <train-labels-file> <test-input-file> 
-#           <numerical-preprocessing> <categorical-preprocessing> <model-type> <test-prediction-output-file>
+# 1. INPUT PARSING -------------------------------------------------
 supported_models = ["LogisticRegression", 
                     "RandomForestClassifier", 
                     "GradientBoostingClassifier", 
@@ -39,7 +36,7 @@ supported_models = ["LogisticRegression",
 supported_numerical = ["None", "StandardScaler"]
 supported_categorical = ["OneHotEncoder", "OrdinalEncoder", "TargetEncoder"]
 
-# Parse user input
+
 # Check number of arguments
 # Check input and output files are .csv
 # Check the preprocessing and model are supported
@@ -102,8 +99,58 @@ model_type = sys.argv[6]
 test_output_file = sys.argv[7]
 
 
+# Confirming that training values and labels match, 
+n_train_samples = len(train_values.index) 
+n_test_samples = len(test_values.index)
+if n_train_samples != n_test_samples: 
+    print("Error: number of training samples and labels not equal.")
+    sys.exit(1)
+# Check features exist
+if len(train_values.columns) <= 1:
+    print("Error: not enough features in training data.")
+    sys.exit(1)
+elif len(test_values.columns) <= 1: 
+    print("Error: not enough features in testing data.")
+    sys.exit(1)
+# Confirm training and testing features are the same
+if set(train_values.columns) != set(test_values.columns): 
+    print("Error: training and testing features do not match.")
+    sys.exit(1)
 
+
+
+
+# TODO
+    # Can also check if train labels exist
+    # Can check if ids of training values and labels match up 
+
+
+
+
+# 2. Data Preprocessing ----------------------------------------------------
+
+# Converting 'date_recorded' into a numerical feature: 
+# the number of days since the first recorded date in the dataset.
+# TODO sin cos transformation
+train_values["date_recorded"] = pd.to_datetime(train_values.date_recorded, format="%Y-%m-%d")
+first_recorded_date = train_values["date_recorded"].min()
+new_dates = train_values["date_recorded"] - first_recorded_date
+n_days_since_first = [x.days for x in new_dates]
+train_values["date_recorded"] = n_days_since_first
 
 
 numeric_cols = train_values.select_dtypes(include=["int64", "float64"], exclude=["object"]).drop(columns=["id"]).columns
 categoric_cols = train_values.select_dtypes(include=["object"], exclude=["int64", "float64"]).columns
+
+
+# Outlier Handling in Numeric Fields through imputation
+# Remove row where construction year is 0 -> missing data
+mask = train_values['construction_year'] != 0
+print(train_values.shape)
+train_values_filt = train_values[mask].reset_index(drop=True)
+train_labels_filt = train_labels[mask].reset_index(drop=True)
+train_values = train_values_filt
+train_labels = train_labels_filt
+
+# Removing amount_tsh column from training data due to high # of NaNs
+train_values.drop(columns=["amount_tsh"])
