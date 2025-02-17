@@ -7,7 +7,7 @@ from scipy.stats import zscore
 import seaborn as sns
 
 
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder, TargetEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder, TargetEncoder, FunctionTransformer
 from sklearn.compose import ColumnTransformer
 from sklearn.compose import make_column_selector as selector
 from sklearn.ensemble import RandomForestClassifier,GradientBoostingClassifier, HistGradientBoostingClassifier
@@ -23,6 +23,7 @@ import plotly
 
 import sys
 import os
+
 
 # Hyperparameter fields 
 train_pct = 0.8
@@ -132,26 +133,28 @@ if set(train_values.columns) != set(test_values.columns):
 # 2. Data Preprocessing ----------------------------------------------------
 
 # Converting 'date_recorded' into a numerical feature: 
-train_values["date_recorded"] = pd.to_datetime(train_values.date_recorded, format="%Y-%m-%d")
-train_values["day"] = train_values["date_recorded"].dt.day
-train_values["month"] = train_values["date_recorded"].dt.month
-train_values["year"] = train_values["date_recorded"].dt.year 
+#train_values["date_recorded"] = pd.to_datetime(train_values.date_recorded, format="%Y-%m-%d") 
 
-train_values["day_sin"] = np.sin(2 * np.pi * train_values["day"] / 31)
-train_values["day_cos"] = np.cos(2 * np.pi * train_values["day"] / 31)
+# Creating transformer for datetime 
+def transform_date_sin_cos(df): 
+    df["date_recorded"] = pd.to_datetime(df.date_recorded, format="%Y-%m-%d") 
+    df["day"] = df["date_recorded"].dt.day
+    df["month"] = df["date_recorded"].dt.month
+    df["year"] = df["date_recorded"].dt.year 
 
-train_values["month_sin"] = np.sin(2 * np.pi * train_values["month"] / 12)
-train_values["month_cos"] = np.cos(2 * np.pi * train_values["month"] / 12)
+    df["day_sin"] = np.sin(2 * np.pi * df["day"] / 31)
+    df["day_cos"] = np.cos(2 * np.pi * df["day"] / 31)
 
-train_values["year_sin"] = np.sin(2 * np.pi * (train_values["year"] % 10) / 3)  
-train_values["year_cos"] = np.cos(2 * np.pi * (train_values["year"] % 10) / 3)
+    df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
+    df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
 
-train_values.drop(columns=["day", "month", "year", "date_recorded"], inplace=True)
+    df["year_sin"] = np.sin(2 * np.pi * (df["year"] % 10) / 3)  
+    df["year_cos"] = np.cos(2 * np.pi * (df["year"] % 10) / 3)
 
+    df.drop(columns=["day", "month", "year", "date_recorded"], inplace=True)
+    return df
 
-numeric_cols = train_values.select_dtypes(include=["int64", "float64"], exclude=["object"]).drop(columns=["id"]).columns
-categoric_cols = train_values.select_dtypes(include=["object"], exclude=["int64", "float64"]).columns
-
+date_transformer = FunctionTransformer(transform_date_sin_cos, validate=False)
 
 # Outlier Handling in Numeric Fields through imputation
 # Remove row where construction year is 0 -> missing data
@@ -164,7 +167,9 @@ train_labels = train_labels_filt
 # Removing amount_tsh column from training data due to high # of NaNs
 train_values.drop(columns=["amount_tsh"])
 
-
+numeric_cols = train_values.select_dtypes(include=["int64", "float64"], exclude=["object", "datetime"]).drop(columns=["id"]).columns
+categoric_cols = train_values.select_dtypes(include=["object"], exclude=["int64", "float64", "datetime"]).columns
+#datetime_cols = train_values.select_dtypes(include=["datetime"], exclude=["int64", "float64", "object"]).columns
 
 
 # # Detect Outlier through Z Scores
@@ -222,12 +227,15 @@ if numerical_preprocessing == "StandardScaler" :
 else:
    scaler = "passthrough"
 
+   
+
 # Transformer object with scaler and encoder
 preprocessor = ColumnTransformer(
    transformers = [
-      ('num', scaler, numeric_cols),
-      ('cat', encoder, categoric_cols)],
-   verbose=False)
+        ('date', date_transformer,["date_recorded"] ),
+        ('num', scaler, numeric_cols),
+        ('cat', encoder, categoric_cols)],
+   verbose=True)
 
 
 # Split the data into train and test sets 
@@ -244,23 +252,17 @@ X_train_transformed = preprocessor.fit_transform(X_train)
 
 if model_type == "LogisticRegression": 
     model = LogisticRegression()
-    model.fit(X_train_transformed, y_train.values.ravel())
-    # model.fit(X_train_transformed, y_train.varavel())
 elif model_type == "RandomForestClassifier": 
     model = RandomForestClassifier()
-    model.fit(X_train_transformed, y_train.values.ravel())
 elif model_type == "GradientBoostingClassifier": 
     model = GradientBoostingClassifier( )
-    model.fit(X_train_transformed, y_train.values.ravel())
 elif model_type == "HistGradientBoostingClassifier":
     model = HistGradientBoostingClassifier()
-    model.fit(X_train_transformed, y_train.values.ravel())
 elif model_type == "MLPClassifier":
     model = MLPClassifier()
-    model.fit(X_train_transformed, y_train.values.ravel())
 
 
-
+model.fit(X_train_transformed, y_train.values.ravel())
 
 # Cross Validation on the training set
 folds = KFold(n_splits=5, random_state=100, shuffle=True)
@@ -284,10 +286,21 @@ print(f"classification accuracy on the validation set: {acc_val:.4f}")
 
 
 # 4. Prediction Generation -------------------------------------------------
+# Preprocessing
+# Outlier Handling in Numeric Fields through imputation
+# Remove row where construction year is 0 -> missing data
+mask = test_values['construction_year'] != 0
+test_values = test_values[mask].reset_index(drop=True)
+
+# Removing amount_tsh column from training data due to high # of NaNs
+test_values.drop(columns=["amount_tsh"])
+
 # Transform test data with same encoder
 X_test = preprocessor.transform(test_values)
+
 # Make prediction
 y_test = model.predict(X_test)
+output_test = pd.DataFrame({"id": test_values["id"].values, "status_group": y_test})
 
 # Write prediction to file 
-y_test.to_csv(test_output_file, index=False)
+output_test.to_csv(test_output_file, index=False)
