@@ -103,8 +103,8 @@ test_output_file = sys.argv[7]
 
 # Confirming that training values and labels match, 
 n_train_samples = len(train_values.index) 
-n_test_samples = len(test_values.index)
-if n_train_samples != n_test_samples: 
+n_train_labels = len(train_labels.index)
+if n_train_samples != n_train_labels: 
     print("Error: number of training samples and labels not equal.")
     sys.exit(1)
 # Check features exist
@@ -132,13 +132,21 @@ if set(train_values.columns) != set(test_values.columns):
 # 2. Data Preprocessing ----------------------------------------------------
 
 # Converting 'date_recorded' into a numerical feature: 
-# the number of days since the first recorded date in the dataset.
-# TODO sin cos transformation
 train_values["date_recorded"] = pd.to_datetime(train_values.date_recorded, format="%Y-%m-%d")
-first_recorded_date = train_values["date_recorded"].min()
-new_dates = train_values["date_recorded"] - first_recorded_date
-n_days_since_first = [x.days for x in new_dates]
-train_values["date_recorded"] = n_days_since_first
+train_values["day"] = train_values["date_recorded"].dt.day
+train_values["month"] = train_values["date_recorded"].dt.month
+train_values["year"] = train_values["date_recorded"].dt.year 
+
+train_values["day_sin"] = np.sin(2 * np.pi * train_values["day"] / 31)
+train_values["day_cos"] = np.cos(2 * np.pi * train_values["day"] / 31)
+
+train_values["month_sin"] = np.sin(2 * np.pi * train_values["month"] / 12)
+train_values["month_cos"] = np.cos(2 * np.pi * train_values["month"] / 12)
+
+train_values["year_sin"] = np.sin(2 * np.pi * (train_values["year"] % 10) / 3)  
+train_values["year_cos"] = np.cos(2 * np.pi * (train_values["year"] % 10) / 3)
+
+train_values.drop(columns=["day", "month", "year", "date_recorded"], inplace=True)
 
 
 numeric_cols = train_values.select_dtypes(include=["int64", "float64"], exclude=["object"]).drop(columns=["id"]).columns
@@ -148,7 +156,6 @@ categoric_cols = train_values.select_dtypes(include=["object"], exclude=["int64"
 # Outlier Handling in Numeric Fields through imputation
 # Remove row where construction year is 0 -> missing data
 mask = train_values['construction_year'] != 0
-print(train_values.shape)
 train_values_filt = train_values[mask].reset_index(drop=True)
 train_labels_filt = train_labels[mask].reset_index(drop=True)
 train_values = train_values_filt
@@ -183,20 +190,22 @@ train_values.drop(columns=["amount_tsh"])
 
 
 
+
+
 if categorical_preprocessing == "OneHotEncoder":
    encoder = OneHotEncoder(
     #   min_frequency= MIN_FREQ_CAT
     #   , max_categories = MAX_CAT
-    #   , handle_unknown='infrequent_if_exist'
+    #   ,
+        handle_unknown='infrequent_if_exist'
     #   , drop= "first"
     #   , sparse_output= False # Linear regression performs poorly on sparse data
    )   
 elif categorical_preprocessing == "OrdinalEncoder":
-   # TODO this will have issues with NaNs -> best practice is to deal with NaNs by imputing or fillna()
    encoder = OrdinalEncoder(
-    #   handle_unknown="use_encoded_value"
-    #   , unknown_value=-1
-    #   , encoded_missing_value= -1 #TODO esto esta bien???
+      handle_unknown="use_encoded_value"
+      , unknown_value=-1
+      , encoded_missing_value= -1 #TODO esto esta bien???
     #   , dtype=float
     #   , min_frequency = MIN_FREQ_CAT
     #   , max_categories = MAX_CAT
@@ -218,10 +227,67 @@ preprocessor = ColumnTransformer(
    transformers = [
       ('num', scaler, numeric_cols),
       ('cat', encoder, categoric_cols)],
-   verbose=True)
+   verbose=False)
 
 
-# # Apply to the training data 
+# Split the data into train and test sets 
+train_values.drop(columns=["id"], inplace = True)
+train_labels.drop(columns=["id"], inplace = True)
+X_train, X_val, y_train, y_val = train_test_split(train_values, train_labels, train_size = train_pct)
+
+# Apply to the training data 
 X_train_transformed = preprocessor.fit_transform(X_train)
    
 
+# 3. Model Training and Evaluation -------------------------------------------------------
+
+
+if model_type == "LogisticRegression": 
+    model = LogisticRegression()
+    model.fit(X_train_transformed, y_train.values.ravel())
+    # model.fit(X_train_transformed, y_train.varavel())
+elif model_type == "RandomForestClassifier": 
+    model = RandomForestClassifier()
+    model.fit(X_train_transformed, y_train.values.ravel())
+elif model_type == "GradientBoostingClassifier": 
+    model = GradientBoostingClassifier( )
+    model.fit(X_train_transformed, y_train.values.ravel())
+elif model_type == "HistGradientBoostingClassifier":
+    model = HistGradientBoostingClassifier()
+    model.fit(X_train_transformed, y_train.values.ravel())
+elif model_type == "MLPClassifier":
+    model = MLPClassifier()
+    model.fit(X_train_transformed, y_train.values.ravel())
+
+
+
+
+# Cross Validation on the training set
+folds = KFold(n_splits=5, random_state=100, shuffle=True)
+cv = cross_val_score(estimator=model,
+                     X=X_train_transformed,
+                     y=y_train.values.ravel(),
+                     cv=folds,
+                     scoring='accuracy')
+print("The cross validation accuracy ")
+print(cv)
+print("Mean of the cross validation scores is: ", cv.mean())
+print("Standard dev of the cross validation scores is: ", cv.std())
+
+
+# calculate classification accuracy of the trained model on the validation set
+X_val_preprocessed = preprocessor.transform(X_val) # first we need to preprocess the input
+y_val_pred = model.predict(X_val_preprocessed) # then make the predictions
+acc_val = accuracy_score(y_pred=y_val_pred, y_true=y_val) # calculate the score
+print(f"classification accuracy on the validation set: {acc_val:.4f}")
+
+
+
+# 4. Prediction Generation -------------------------------------------------
+# Transform test data with same encoder
+X_test = preprocessor.transform(test_values)
+# Make prediction
+y_test = model.predict(X_test)
+
+# Write prediction to file 
+y_test.to_csv(test_output_file, index=False)
