@@ -24,6 +24,8 @@ import plotly
 import sys
 import os
 
+import time
+start_time = time.time()
 
 # Hyperparameter fields 
 train_pct = 0.8
@@ -158,14 +160,14 @@ date_transformer = FunctionTransformer(transform_date_sin_cos, validate=False)
 
 # Outlier Handling in Numeric Fields through imputation
 # Remove row where construction year is 0 -> missing data
-mask = train_values['construction_year'] != 0
-train_values_filt = train_values[mask].reset_index(drop=True)
-train_labels_filt = train_labels[mask].reset_index(drop=True)
-train_values = train_values_filt
-train_labels = train_labels_filt
+# mask = train_values['construction_year'] != 0
+# train_values_filt = train_values[mask].reset_index(drop=True)
+# train_labels_filt = train_labels[mask].reset_index(drop=True)
+# train_values = train_values_filt
+# train_labels = train_labels_filt
 
-# Removing amount_tsh column from training data due to high # of NaNs
-train_values.drop(columns=["amount_tsh"])
+# # Removing amount_tsh column from training data due to high # of NaNs
+# train_values.drop(columns=["amount_tsh"])
 
 numeric_cols = train_values.select_dtypes(include=["int64", "float64"], exclude=["object", "datetime"]).drop(columns=["id"]).columns
 categoric_cols = train_values.select_dtypes(include=["object"], exclude=["int64", "float64", "datetime"]).columns
@@ -199,12 +201,11 @@ categoric_cols = train_values.select_dtypes(include=["object"], exclude=["int64"
 
 if categorical_preprocessing == "OneHotEncoder":
    encoder = OneHotEncoder(
-    #   min_frequency= MIN_FREQ_CAT
+       min_frequency= MIN_FREQ_CAT
     #   , max_categories = MAX_CAT
-    #   ,
-        handle_unknown='infrequent_if_exist'
+       , handle_unknown='infrequent_if_exist'
     #   , drop= "first"
-    #   , sparse_output= False # Linear regression performs poorly on sparse data
+   , sparse_output= False # Linear regression performs poorly on sparse data
    )   
 elif categorical_preprocessing == "OrdinalEncoder":
    encoder = OrdinalEncoder(
@@ -213,7 +214,7 @@ elif categorical_preprocessing == "OrdinalEncoder":
       , encoded_missing_value= -1 #TODO esto esta bien???
     #   , dtype=float
     #   , min_frequency = MIN_FREQ_CAT
-    #   , max_categories = MAX_CAT
+    # , max_categories = MAX_CAT
    )
 elif categorical_preprocessing == "TargetEncoder":
    encoder = TargetEncoder(
@@ -289,11 +290,11 @@ print(f"classification accuracy on the validation set: {acc_val:.4f}")
 # Preprocessing
 # Outlier Handling in Numeric Fields through imputation
 # Remove row where construction year is 0 -> missing data
-mask = test_values['construction_year'] != 0
-test_values = test_values[mask].reset_index(drop=True)
+# mask = test_values['construction_year'] != 0
+# test_values = test_values[mask].reset_index(drop=True)
 
-# Removing amount_tsh column from training data due to high # of NaNs
-test_values.drop(columns=["amount_tsh"])
+# # Removing amount_tsh column from training data due to high # of NaNs
+# test_values.drop(columns=["amount_tsh"])
 
 # Transform test data with same encoder
 X_test = preprocessor.transform(test_values)
@@ -304,3 +305,9 @@ output_test = pd.DataFrame({"id": test_values["id"].values, "status_group": y_te
 
 # Write prediction to file 
 output_test.to_csv(test_output_file, index=False)
+
+end_time = time.time()
+execution_time = end_time - start_time
+minutes, seconds = divmod(execution_time, 60)
+
+print(f"Execution Time: {int(minutes)} minutes and {seconds:.2f} seconds")
