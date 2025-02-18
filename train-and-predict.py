@@ -24,13 +24,11 @@ import plotly
 import sys
 import os
 
-import time
-start_time = time.time()
+
 
 # Hyperparameter fields 
-train_pct = 0.8
+train_pct = 1.0
 MIN_FREQ_CAT = 1000  
-MAX_CAT = 10
 
 # 1. INPUT PARSING -------------------------------------------------
 supported_models = ["LogisticRegression", 
@@ -78,12 +76,10 @@ def check_and_read_csv(filepath):
     if not os.path.exists(filepath):
         print("Error: the file '" + filepath + "' does not exist", file= sys.stderr)
         sys.exit(1)
-    
     # Check if file is empty
     if os.path.getsize(filepath) == 0:
         print(f"Error: The file '{filepath}' is empty.")
         sys.exit(1)
-
     try:
         # Read the file into a DataFrame
         df = pd.read_csv(filepath)
@@ -91,6 +87,7 @@ def check_and_read_csv(filepath):
     except Exception as e:
         print(f"Error reading file '{filepath}': {e}")
         sys.exit(1)
+
 
 # Import data from specificed locations
 train_values = check_and_read_csv(sys.argv[1])
@@ -104,7 +101,7 @@ model_type = sys.argv[6]
 test_output_file = sys.argv[7]
 
 
-# Confirming that training values and labels match, 
+# Confirming training values and labels match, 
 n_train_samples = len(train_values.index) 
 n_train_labels = len(train_labels.index)
 if n_train_samples != n_train_labels: 
@@ -121,14 +118,6 @@ elif len(test_values.columns) <= 1:
 if set(train_values.columns) != set(test_values.columns): 
     print("Error: training and testing features do not match.")
     sys.exit(1)
-
-
-
-
-# TODO
-    # Can also check if train labels exist
-    # Can check if ids of training values and labels match up 
-
 
 
 
@@ -158,68 +147,25 @@ def transform_date_sin_cos(df):
 
 date_transformer = FunctionTransformer(transform_date_sin_cos, validate=False)
 
-# Outlier Handling in Numeric Fields through imputation
-# Remove row where construction year is 0 -> missing data
-# mask = train_values['construction_year'] != 0
-# train_values_filt = train_values[mask].reset_index(drop=True)
-# train_labels_filt = train_labels[mask].reset_index(drop=True)
-# train_values = train_values_filt
-# train_labels = train_labels_filt
-
-# # Removing amount_tsh column from training data due to high # of NaNs
-# train_values.drop(columns=["amount_tsh"])
-
 numeric_cols = train_values.select_dtypes(include=["int64", "float64"], exclude=["object", "datetime"]).drop(columns=["id"]).columns
 categoric_cols = train_values.select_dtypes(include=["object"], exclude=["int64", "float64", "datetime"]).columns
-#datetime_cols = train_values.select_dtypes(include=["datetime"], exclude=["int64", "float64", "object"]).columns
-
-
-# # Detect Outlier through Z Scores
-# z_scores = np.abs(train_values[numeric_cols].apply(zscore))
-# threshold = 3
-# # train_values.describe()
-# # mask = (np.abs(z_scores) < threshold).all(axis=1)
-# # non_outlier_values = train_values[mask].reset_index(drop=True)
-# # non_outlier_labels = train_labels[mask].reset_index(drop=True)
-# # train_values = non_outlier_values
-# # train_labels = non_outlier_labels
-# outliers = (z_scores > threshold).any(axis=1)
-# print(outliers)
-# values_clean = train_values[~outliers].reset_index(drop=True)
-# labels_clean = train_labels[~outliers].reset_index(drop=True)
-# train_values = values_clean
-# train_labels = labels_clean
-
-# print("New corpus shape after zscore outlier")
-# print(train_values.shape)
-# print(train_labels.shape)
-
-
-
-
 
 
 if categorical_preprocessing == "OneHotEncoder":
    encoder = OneHotEncoder(
        min_frequency= MIN_FREQ_CAT
-    #   , max_categories = MAX_CAT
        , handle_unknown='infrequent_if_exist'
-    #   , drop= "first"
-   , sparse_output= False # Linear regression performs poorly on sparse data
+   , sparse_output= False 
    )   
 elif categorical_preprocessing == "OrdinalEncoder":
    encoder = OrdinalEncoder(
       handle_unknown="use_encoded_value"
       , unknown_value=-1
-      , encoded_missing_value= -1 #TODO esto esta bien???
-    #   , dtype=float
-    #   , min_frequency = MIN_FREQ_CAT
-    # , max_categories = MAX_CAT
+      , encoded_missing_value= -1 
+      , min_frequency = MIN_FREQ_CAT
    )
 elif categorical_preprocessing == "TargetEncoder":
-   encoder = TargetEncoder(
-      #target_type = "multiclass"
-   )
+   encoder = TargetEncoder()
 
 
 # Numerical preprocessing
@@ -227,7 +173,6 @@ if numerical_preprocessing == "StandardScaler" :
    scaler = StandardScaler()
 else:
    scaler = "passthrough"
-
    
 
 # Transformer object with scaler and encoder
@@ -236,21 +181,24 @@ preprocessor = ColumnTransformer(
         ('date', date_transformer,["date_recorded"] ),
         ('num', scaler, numeric_cols),
         ('cat', encoder, categoric_cols)],
-   verbose=True)
+   verbose = False)
 
 
 # Split the data into train and test sets 
-train_values.drop(columns=["id"], inplace = True)
-train_labels.drop(columns=["id"], inplace = True)
-X_train, X_val, y_train, y_val = train_test_split(train_values, train_labels, train_size = train_pct)
+# We are only interested in testing accuracy so there will be no validation set
+X_train = train_values.drop(columns=["id"])
+y_train = train_labels.drop(columns=["id"])
+# X_train, X_val, y_train, y_val = train_test_split(train_values, train_labels, train_size = train_pct)
 
 # Apply to the training data 
-X_train_transformed = preprocessor.fit_transform(X_train)
+if categorical_preprocessing == "TargetEncoder": 
+    # Target Encoder requires labels during fitting
+    X_train_transformed = preprocessor.fit_transform(X_train, y_train["status_group"])
+else: 
+    X_train_transformed = preprocessor.fit_transform(X_train)
    
 
 # 3. Model Training and Evaluation -------------------------------------------------------
-
-
 if model_type == "LogisticRegression": 
     model = LogisticRegression()
 elif model_type == "RandomForestClassifier": 
@@ -272,30 +220,14 @@ cv = cross_val_score(estimator=model,
                      y=y_train.values.ravel(),
                      cv=folds,
                      scoring='accuracy')
-print("The cross validation accuracy ")
+print("The cross validation accuracies:")
 print(cv)
 print("Mean of the cross validation scores is: ", cv.mean())
 print("Standard dev of the cross validation scores is: ", cv.std())
 
 
-# calculate classification accuracy of the trained model on the validation set
-X_val_preprocessed = preprocessor.transform(X_val) # first we need to preprocess the input
-y_val_pred = model.predict(X_val_preprocessed) # then make the predictions
-acc_val = accuracy_score(y_pred=y_val_pred, y_true=y_val) # calculate the score
-print(f"classification accuracy on the validation set: {acc_val:.4f}")
-
-
 
 # 4. Prediction Generation -------------------------------------------------
-# Preprocessing
-# Outlier Handling in Numeric Fields through imputation
-# Remove row where construction year is 0 -> missing data
-# mask = test_values['construction_year'] != 0
-# test_values = test_values[mask].reset_index(drop=True)
-
-# # Removing amount_tsh column from training data due to high # of NaNs
-# test_values.drop(columns=["amount_tsh"])
-
 # Transform test data with same encoder
 X_test = preprocessor.transform(test_values)
 
@@ -305,9 +237,3 @@ output_test = pd.DataFrame({"id": test_values["id"].values, "status_group": y_te
 
 # Write prediction to file 
 output_test.to_csv(test_output_file, index=False)
-
-end_time = time.time()
-execution_time = end_time - start_time
-minutes, seconds = divmod(execution_time, 60)
-
-print(f"Execution Time: {int(minutes)} minutes and {seconds:.2f} seconds")
