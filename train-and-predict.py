@@ -1,25 +1,16 @@
 import pandas as pd
 import numpy as np
-import sklearn as sk
-import matplotlib.pyplot as plt
 
-from scipy.stats import zscore
-import seaborn as sns
 
 
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder, TargetEncoder, FunctionTransformer
 from sklearn.compose import ColumnTransformer
-from sklearn.compose import make_column_selector as selector
 from sklearn.ensemble import RandomForestClassifier,GradientBoostingClassifier, HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split, KFold, cross_val_score
-from sklearn.metrics import accuracy_score
+from sklearn.model_selection import KFold, cross_val_score
 from sklearn.neural_network import MLPClassifier
-from sklearn.pipeline import Pipeline
 
-import optuna
-import optuna.visualization as vis
-import plotly
+
 
 import sys
 import os
